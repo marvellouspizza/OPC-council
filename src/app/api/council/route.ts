@@ -60,24 +60,9 @@ export async function POST(request: NextRequest) {
 
     // 如果有活跃会议，先关闭它
     if (existingSession) {
-      await prisma.async (log: CouncilLogEntry) => {
-              const eventData = formatSSEEvent(log);
-              controller.enqueue(encoder.encode(eventData));
-              
-              // 同时保存日志到数据库
-              await prisma.councilLog.create({
-                data: {
-                  sessionId: councilSession.id,
-                  agentId: log.agentId,
-                  type: log.type,
-                  content: log.content,
-                  internalState: log.internalState as any,
-                  metadata: log.metadata as any,
-                  timestamp: log.timestamp,
-                },
-              }).catch(err => {
-                console.error('保存日志失败:', err);
-              }
+      await prisma.councilSession.update({
+        where: { id: existingSession.id },
+        data: {
           status: 'CANCELLED',
           completedAt: new Date(),
         },
