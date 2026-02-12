@@ -1,0 +1,210 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// User 表 - 存储 SecondMe 用户信息和 OAuth Token
+model User {
+  id                String    @id @default(cuid())
+  secondmeUserId    String    @unique @map("secondme_user_id")
+  email             String?
+  name              String?
+  avatarUrl         String?   @map("avatar_url")
+  route             String?
+  
+  // OAuth Token 字段（必需）
+  accessToken       String    @map("access_token")
+  refreshToken      String    @map("refresh_token")
+  tokenExpiresAt    DateTime  @map("token_expires_at")
+
+  // === 用户画像 (Deep Profile) ===
+  mbtiType          String?   @map("mbti_type")          // 用户自身MBTI
+  profession        String?                              // 职业名称
+  professionCategory String?  @map("profession_category") // high/mid/low rigidity
+  rigidityCoefficient Float? @default(0.5) @map("rigidity_coefficient") // Rc 系数 0.0-1.0
+  
+  // 瞬时状态
+  moodState         String?   @default("flow") @map("mood_state") // sprint/flow/survival/anxiety
+  energyLevel       Int?      @default(80) @map("energy_level")   // 0-100
+  
+  // 用户自定义底线 (UBL)
+  ublSleepHours     Float?    @default(8.0) @map("ubl_sleep_hours")
+  ublMinBudget      Float?    @default(500) @map("ubl_min_budget")
+  ublSocialMinutes  Int?      @default(60) @map("ubl_social_minutes")    // 每日最低社交分钟
+  ublMaxWorkHours   Float?    @default(2.0) @map("ubl_max_work_hours")   // 单段最大工作时长
+
+  // === 经济系统字段 ===
+  hourlyWage        Float?    @default(0) @map("hourly_wage")          // 用户时薪 (¥/h)
+  tokenBalance      Float?    @default(500) @map("token_balance")      // Token 当前余额
+  dailyBudgetCap    Float?    @default(500) @map("daily_budget_cap")   // 每日预算上限
+  creditScore       Int?      @default(100) @map("credit_score")       // 信用分 0-200
+  
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+  
+  // 关联
+  notes             Note[]
+  chatSessions      ChatSession[]
+  councilSessions   CouncilSession[]
+
+  @@map("users")
+}
+
+// Note 表 - 存储用户笔记
+model Note {
+  id                Int       @id @default(autoincrement())
+  userId            String    @map("user_id")
+  secondmeNoteId    Int?      @map("secondme_note_id")
+  content           String
+  createdAt         DateTime  @default(now()) @map("created_at")
+  
+  user              User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("notes")
+}
+
+// ChatSession 表 - 存储聊天会话记录
+model ChatSession {
+  id                String    @id @default(cuid())
+  userId            String    @map("user_id")
+  secondmeSessionId String?   @map("secondme_session_id")
+  title             String?
+  lastMessage       String?   @map("last_message")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+  
+  user              User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("chat_sessions")
+}
+
+// ==================== Silent Council 议会系统 ====================
+
+// Agent 表 - 存储4大阵营代理的状态 (ENTJ/ISFJ/INFJ/ESTP)
+model Agent {
+  id                String    @id // 代理ID: ENTJ, ISFJ, INFJ, ESTP
+  role              String    // 职能角色名称
+  roleCn            String    @map("role_cn") // 中文角色名
+  sector            String    // 板块: analysts, guardians, diplomats, explorers
+  currentWeight     Float     @default(1.0) @map("current_weight") // 基于模板的权重
+  resourceInventory Json      @default("{}") @map("resource_inventory") // {"TIME":100,"HP":80,"SOC":50,"WLTH":100}
+  systemPrompt      String?   @map("system_prompt") @db.Text // 代理专属的系统提示词
+  status            String    @default("IDLE") // IDLE, ACTIVE, SPEAKING, TRADING, VETOING, SANCTIONED, WHISPERING
+
+  // === 扩展：满意度/影响力/制裁 ===
+  satisfaction      Int       @default(50)      // 满意度 0-100
+  influence         Int       @default(50)      // 影响力 0-100
+  isSanctioned      Boolean   @default(false) @map("is_sanctioned") // 是否被制裁
+  sanctionRounds    Int       @default(0) @map("sanction_rounds")   // 剩余制裁轮次
+
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+
+  // 关联
+  proposalsMade     Transaction[] @relation("proposer")
+  proposalsReceived Transaction[] @relation("responder")
+  councilVotes      CouncilVote[]
+
+  @@map("agents")
+}
+
+// CouncilSession 表 - 议会会议记录
+model CouncilSession {
+  id                String    @id @default(cuid())
+  userId            String    @map("user_id")
+  templateId        String    @map("template_id") // 人生模板 ID
+  status            String    @default("ACTIVE") // ACTIVE, COMPLETED, CANCELLED, DEADLOCKED
+  chairAgentId      String?   @map("chair_agent_id") // 当前主席代理
+  roundNumber       Int       @default(0) @map("round_number")
+  trigger           String?   // 触发议会的事件描述
+  finalVerdict      Json?     @map("final_verdict") // 最终裁决结果
+  resultCard        Json?     @map("result_card") // 议会结算报告
+  resourceSnapshot  Json?     @map("resource_snapshot") // 资源快照
+  userProfileSnapshot Json?   @map("user_profile_snapshot") // 用户画像快照
+  scheduleOutput    Json?     @map("schedule_output")      // 日程输出
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+  completedAt       DateTime? @map("completed_at") // 议会完成时间
+
+  user              User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  transactions      Transaction[]
+  votes             CouncilVote[]
+  logs              CouncilLog[]
+
+  @@map("council_sessions")
+}
+
+// Transaction 表 - 代理间的交易/提案记录
+model Transaction {
+  id                String    @id @default(cuid())
+  sessionId         String    @map("session_id")
+  proposerId        String    @map("proposer_id")
+  responderId       String?   @map("responder_id")
+  method            String    // council.propose, council.counter, council.consensus, council.veto
+  actionType        String?   @map("action_type") // SCHEDULE_BLOCK, RESOURCE_TRADE, VETO...
+  description       String    @db.Text
+  resourceDelta     Json      @map("resource_delta") // {"TIME":-180, "HP":-15, "WLTH":"+Potential"}
+  condition         Json?     // 条件交换内容
+  status            String    @default("PENDING") // PENDING, ACCEPTED, REJECTED, VETOED, CONSENSUS
+  rationale         String?   @db.Text
+  roundNumber       Int       @map("round_number")
+  createdAt         DateTime  @default(now()) @map("created_at")
+
+  session           CouncilSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  proposer          Agent     @relation("proposer", fields: [proposerId], references: [id])
+  responder         Agent?    @relation("responder", fields: [responderId], references: [id])
+
+  @@map("transactions")
+}
+
+// CouncilVote 表 - 投票记录
+model CouncilVote {
+  id                String    @id @default(cuid())
+  sessionId         String    @map("session_id")
+  agentId           String    @map("agent_id")
+  vote              String    // APPROVE, REJECT, ABSTAIN, VETO
+  weight            Float     // 投票时的实际权重
+  reason            String?   @db.Text
+  createdAt         DateTime  @default(now()) @map("created_at")
+
+  session           CouncilSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  agent             Agent     @relation(fields: [agentId], references: [id])
+
+  @@map("council_votes")
+}
+
+// CouncilLog 表 - 议会流式日志（用于前端剧本播放）
+model CouncilLog {
+  id                String    @id @default(cuid())
+  sessionId         String    @map("session_id")
+  agentId           String?   @map("agent_id") // null 表示系统消息
+  type              String    // SYSTEM, SPEECH, PROPOSAL, COUNTER, VETO, CONSENSUS, NARRATION, WHISPER, INTERRUPT, BOTTOM_LINE_ALERT
+  content           String    @db.Text // public_speech 自然语言内容（用户可见）
+  internalState     Json?     @map("internal_state") // 双通道内部状态JSON（驱动UI，不向用户显示）
+  metadata          Json?     // 附加数据
+  timestamp         DateTime  @default(now())
+
+  session           CouncilSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@map("council_logs")
+}
+
+// LifeTemplate 表 - 人生模板
+model LifeTemplate {
+  id                String    @id @default(cuid())
+  name              String    // 如 "Startup Sprint"
+  nameCn            String    @map("name_cn") // 中文名
+  description       String    @db.Text
+  weightMatrix      Json      @map("weight_matrix") // {"ENTJ":2.5, "ISFJ":0.4, ...}
+  exchangeRates     Json      @map("exchange_rates") // 汇率规则
+  isDefault         Boolean   @default(false) @map("is_default")
+  createdAt         DateTime  @default(now()) @map("created_at")
+
+  @@map("life_templates")
+}

@@ -1,0 +1,216 @@
+﻿Silent Council：核心算法映射与逻辑重构方案
+1. 初始化算法：基于用户画像的 Token 权重分配
+目标：解决“初始根据用户画像随机生成 Token”的逻辑。
+原理：利用 MBTI 的四个维度（E/I, S/N, T/F, J/P）作为权重参数，影响四个代理（效率、健康、关系、风险）的初始资金池。
+1.1 代理阵营与 MBTI 映射
+我们将 16 型人格映射为 4 个核心代理的“亲和度系数” (  )，范围 0.8 - 1.5。
+代理 ID (Agent)
+	代表属性
+	核心关联维度
+	逻辑描述
+	Agent_ENTJ (效率之神)
+	生产力/完成度
+	J (判断) & T (思考)
+	J 越高，预算越倾向于“按时完成”；T 越高，越忽视副作用。
+	Agent_ISFJ (健康/守序)
+	精神值/稳定性
+	S (实感) & I (内向)
+	S 偏好稳定，I 需要独处恢复精力。提供保底 Token。
+	Agent_ENFP (关系/意义)
+	社交/影响力
+	F (情感) & E (外向)
+	F 关注任务的情感价值，E 关注外部反馈。
+	Agent_ESTP (风险/娱乐)
+	创新/摸鱼/甚至赌
+	P (感知)
+	P 越高，越容易接受“概率性”任务或高风险高回报的投入。
+	1.2 Token 分配算法 (伪代码)
+假设每日总预算   。
+
+
+Python
+
+
+
+
+def allocate_initial_tokens(user_mbti):
+   # 基础分配：每人 20%
+   allocation = {
+       'ENTJ': 200, 'ISFJ': 200, 'ENFP': 200, 'ESTP': 200
+   }
+   
+   # 维度加权 (示例)
+   if 'J' in user_mbti:
+       allocation += 100  # 计划性强，效率神钱多
+       allocation -= 50   # 压制混乱
+   if 'P' in user_mbti:
+       allocation += 100  # 随性，娱乐神钱多
+       allocation -= 50
+   if 'T' in user_mbti:
+       allocation += 50
+       allocation['ENFP'] -= 50
+   if 'F' in user_mbti:
+       allocation['ENFP'] += 100  # 重视意义
+       
+   # 添加随机波动 (±10%) 模拟“今日状态”
+   for agent in allocation:
+       allocation[agent] *= random.uniform(0.9, 1.1)
+       
+   return normalize_to_total(allocation, 1000) # 归一化确保总和为1000
+
+________________
+2. 日程生成引擎：基于画像的“全数字化”任务链
+目标：生成 1 小时、符合逻辑、全数字化的任务列表。
+技术栈：SecondMe API (Model: architect-v1) + Prompt Engineering。
+2.1 任务生成 Prompt 设计
+此 Prompt 将由 Supabase Edge Function 调用。
+System Prompt:
+你是 Silent Council 的“日程架构师”。你的任务是根据用户的[职业]、和[当前状态]，生成一个严格限制在 1 小时内的数字化任务列表。
+绝对规则 (Constraints):
+1. Digital Only: 严禁物理世界任务（如“去跑步”、“拿快递”）。如果是健身，必须转化为“生成健身计划表”或“购买健身器材”。
+2. Mix: 必须包含 1 个“高耗能任务”（需大量计算/创作）、1 个“Deadline 任务”（必须做）、若干“低耗能琐事”。
+3. Specific Tools: 必须指名道姓使用具体 AI 工具（如 "Use Claude to...", "Use Midjourney to..."）。
+4. Format: 返回纯 JSON 格式。
+User Input Example:
+用户：INTP，后端工程师，昨晚熬夜了，现在有点累。
+Output JSON Structure:
+
+
+JSON
+
+
+
+
+{
+ "total_duration": 60,
+ "tasks":
+}
+
+________________
+3. 经济系统：底线保底与预扣除逻辑
+目标：防止 AI 聊崩溃，确保 Deadline 任务有钱做。
+3.1 预扣除 (Escrow) 算法
+在议会开始前（Phase 0），系统强制执行：
+1. 扫描所有 is_deadline: true 的任务。
+2. 计算其 Level C (最低交付标准) 所需 Token。
+3. 从总池中冻结这部分资金。
+4. 剩余资金 (  ) 才是 4 个 Agent 在议会上争夺的“流动资金”。
+  
+
+逻辑处理：
+   * 如果   ：触发红色警报。
+      * ISFJ（健康神）强制介入，建议用户“砍掉”非 Deadline 任务。
+      * 或者触发“透支模式”（扣除用户信用分）。
+________________
+4. 议会博弈引擎：3-5 分钟微型剧场
+目标：实现高频、滚动的代码流对话，模拟博弈过程。
+实现：Supabase Edge Function (Long-running) + Realtime Broadcast。
+4.1 剧场三阶段逻辑
+第一阶段：数据加载与预演 (0s - 30s)
+      * 前端表现：终端自检，显示“Connecting to Neural Link...”，载入 Agent 头像。
+      * 后端逻辑：
+      * 初始化 Session，计算 Escrow。
+      * 各 Agent 读取任务列表，根据自己的 Personality 生成“初始立场” (Initial Stance)。
+      * 例如 Efficiency 神扫描到 30 分钟的代码任务，标记为“必须升级到 Level S”。
+第二阶段：核心议会博弈 (30s - 4m30s)
+      * 循环机制 (The Game Loop)：
+后端运行一个 while 循环，每 2 秒 (Tick) 推进一次。
+      * 发言权轮转算法：
+         * 计算每个任务当前的“争议度” (Controversy Score)。
+         * 争议度最高的任务，相关 Agent 获得发言权。
+         * 例如：娱乐神想把 Token 投给游戏攻略，效率神极力反对。
+         * SecondMe Agent Prompt (博弈版)：
+你是 [Agent Name]。当前任务是。
+现状：等级 [Current Level]，花费 [Cost]。
+你的私房钱：。
+对手出价：。
+行动：
+         1. BID: 投入私房钱升级任务。
+         2. ATTACK: 嘲讽对手的方案（如“这太浪费了”）。
+         3. TRADE: "如果你让我在 Task A 上省钱，我就支持你的 Task B。"
+输出要求：简短，像聊天群，带 Markdown 格式但不要用 * 号。
+            * 文本清洗逻辑：
+            * Regex 去除 **, __, Let's discuss 等 AI 惯用语。
+            * 强制截断超过 120 字符的发言。
+第三阶段：执行与坍缩 (最后 30s)
+            * 前端表现：进度条疯狂读条，显示“生成中...”。
+            * 后端逻辑：
+            * 锁定所有任务最终等级 (Level S/A/B/C)。
+            * 结算 Token 余额。
+            * 生成“结算卡片”。
+________________
+5. 任务分级与坍缩逻辑 (The Collapse)
+目标：将博弈结果转化为具体的交付物等级。
+5.1 三级交付标准定义 (Metadata Schema)
+数据库中每个 Task 都有以下 JSON 结构：
+
+
+JSON
+
+
+
+
+"levels": {
+ "C": { "cost": 10, "desc": "纯复制粘贴/通用模板", "outcome": "敷衍了事" },
+ "B": { "cost": 50, "desc": "针对性修改/逻辑通顺", "outcome": "合格交付" },
+ "A": { "cost": 200, "desc": "深度研究/多模态生成/完美排版", "outcome": "超预期" }
+}
+
+5.2 交易场景逻辑 (The Trade)
+当 Agent 资金不足时，触发P2P 交易协议：
+            1. 触发：娱乐神想把“游戏攻略”升到 Level A (缺 50 Token)。
+            2. 寻找：查询谁有闲置 Token？-> 效率神。
+            3. 条件：效率神要求“把‘整理邮件’降级到 Level C”。
+            4. 判定：
+            * 如果 Level C 邮件 的风险 < Level A 攻略 的收益 (由 User Persona 决定权重)。
+            * 交易成立。
+            * 日志广播：[系统] 娱乐神 与 效率神 达成协议：牺牲邮件质量换取娱乐预算。
+________________
+6. 结算系统：事件卡片与 RNG (The Roll)
+目标：任务结束后的随机性奖励/惩罚。
+6.1 结果评级算法
+每个任务结束后，根据 投入的 Token 和 随机种子 (Luck) 计算最终结果。
+  
+
+            * 1 - 大成功 (Critical Success)
+            * 条件：Score > 阈值 (e.g., 250)
+            * 效果：获得特殊道具（如“时间碎片”），Social Stats +10。
+            * 文案：“AI 写的代码被 GitHub 推荐了！”
+            * 2 - 成功 (Success)
+            * 条件：Score > 及格线
+            * 效果：无特殊变化，获得标准经验值。
+            * 3 - 勉强通过 (Barely Passed)
+            * 条件：Score < 及格线 但 > 0
+            * 效果：Professional Stats -5。
+            * 文案：“虽然跑通了，但全是 Warning。”
+            * 4 - 大失败 (Critical Fail)
+            * 条件：Token 不足 Level C 或 触发熔断。
+            * 效果：Sanity (精神值) -20，任务标记为 "CORRUPTED"。
+            * 文案：“AI 在生成过程中产生幻觉，输出了一堆乱码。”
+________________
+7. 终极优化报告 (Ultimater Report)
+目标：给用户一小时的最终交代。
+这不是一份枯燥的 Log，而是一张可视化收据。
+内容结构：
+            1. Header: “第 2048 次议会决议”
+            2. Summary:
+            * 总耗时：3 分 42 秒（现实） / 1 小时（模拟）
+            * Token 净盈余：+120 (存入明日预算)
+            3. Key Highlights (高光时刻):
+            * 显示那个“大成功”的任务卡片。
+            4. Files Delivered (虚拟交付物):
+            * 2024_Q1_Financial_Report_vFinal.pdf (Level A)
+            * Auth_Module_Refactored.ts (Level B)
+            * Elden_Ring_Speedrun.mp4 (Level A)
+            * (注：用户点击只会看到生成过程的 Log 或 Summary，不需要真的生成 1G 的视频)
+________________
+8. 闭环逻辑：日循环与成长
+目标：让单次博弈连接成长期游戏。
+            1. 每日重置 (Daily Cron):
+            * 每天 00:00，Supabase 调用 pg_cron。
+            * 重置 Token = 1000 + (昨日盈余 * 0.5)。
+            * 盈余结转鼓励玩家在某一天省钱，为了第二天“干票大的”。
+            2. Agent 成长:
+            * 如果玩家频繁支持“娱乐神”，该 Agent 的初始权重会逐渐增加。
+            * 最终导致生成日程时，系统会自动多安排娱乐任务（“AI 觉得你太累了”）。
+            * 逆向调节：如果某 Agent 权重过高导致崩盘（如天天玩游戏导致没钱工作），系统会触发“强制修正事件”，强制锁定工作任务。

@@ -1,0 +1,444 @@
+﻿Silent Council：全栈逻辑实现与博弈机制构建深度报告
+1. 执行摘要与架构范式：赛博管家的数字化重构
+本报告旨在为《Silent Council》项目提供一份详尽的、专家级的全栈逻辑实现计划。基于《核心机制修正表》1、UI设计文档 1 以及 SecondMe API 和 Supabase 的技术特性，我们将构建一个基于“赛博管家”设定的数字化博弈生态系统。该系统的核心在于将传统的时间管理转化为一场由16位 MBTI 人格 AI 代理参与的资源争夺战，通过“电影化时间压缩”技术，将枯燥的决策过程转化为高强度的视觉奇观。
+1.1 项目愿景与技术哲学
+《Silent Council》不仅是一个生产力工具，更是一场关于“注意力经济”的社会实验。其设计哲学遵循“数字决定论”（Digital Determinism）：剔除所有无法被数字闭环验证的物理实体任务，仅保留代码生成、报表整理、数据分析等纯数字化劳动 1。在这个封闭的经济体中，用户的注意力被量化为 OPC Token，而 AI 代理则成为竞逐这一稀缺资源的理性（或非理性）行动者。
+从架构角度审视，系统采用“胖后端、瘦前端、强实时”的设计范式。Supabase 不仅作为数据持久层，更通过 Edge Functions 承担了即时演算的博弈逻辑；SecondMe API 提供了具备深层记忆与人格一致性的智能代理；前端 Next.js 16 则专注于将复杂的后台数据流转化为赛博朋克风格的“动态富文本”演出 1。
+1.2 核心机制的逻辑映射
+根据修正表 1，我们的开发计划必须严格遵循以下逻辑约束，并在代码层面予以实现：
+核心机制 (Mechanism)
+	逻辑实现方案 (Implementation Logic)
+	关键技术栈 (Tech Stack)
+	全数字化任务 (Digital Only)
+	任务生成器仅调用涵盖 API/纯文本/数据处理的 Prompt 库，物理关键词过滤。
+	Edge Functions, SecondMe Prompting
+	电影化压缩 (Cinematic Time)
+	游戏循环与现实时间的解耦，12:1 的时间流速映射算法。
+	Supabase Realtime, Edge Functions
+	资源权重 (Initial Weight)
+	基于用户画像 (User Persona) 的动态 Token 分配算法。
+	PostgreSQL Triggers, SecondMe Memory
+	结果评级卡片 (Result Card)
+	基于多维加权（时间、Token剩余、AI一致性）的结算算法。
+	React 19, Supabase DB
+	降级与熔断 (Meltdown)
+	状态机 (State Machine) 中的异常状态处理与信用值扣除逻辑。
+	Database Constraints, PL/pgSQL
+	每日预算 (Daily Budget)
+	基于 Cron 的周期性经济重置与通缩控制。
+	Supabase pg_cron
+	时薪锚定 (Time Value)
+	实时汇率换算引擎 (RMB <-> Token)。
+	Frontend Logic, DB Computed Columns
+	预扣除机制 (Escrow System)
+	强一致性的数据库事务锁 (ACID Transactions)。
+	PostgreSQL Functions
+	上帝之手 (The God Hand)
+	高优先级的实时指令注入与状态覆写。
+	Supabase Realtime Broadcast
+	________________
+2. 阶段一：经济基石与数据库架构设计 (Weeks 1-2)
+在任何 AI 逻辑介入之前，必须构建一个坚不可摧的经济账本。根据《修正表》第 8 条“预扣除机制”和第 6 条“每日预算制”，数据库不仅要存储数据，还要充当游戏规则的最终裁决者。
+2.1 数据库模式设计 (PostgreSQL Schema)
+我们采用 Supabase 托管的 PostgreSQL 15 数据库。为了支撑高频的 Token 交易和实时博弈，数据表设计需兼顾规范化与查询性能。
+2.1.1 核心档案表 (profiles)：锚定现实价值
+该表是“时薪锚定法” 1 的物理载体。
+
+
+SQL
+
+
+
+
+CREATE TABLE public.profiles (
+   id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+   username TEXT,
+   mbti_persona VARCHAR(4) NOT NULL, -- 用户的 MBTI，影响初始资源权重 
+   hourly_wage NUMERIC(10, 2) DEFAULT 0, -- 用户设定的时薪，用于计算 Token 价值
+   token_balance INTEGER DEFAULT 500, -- 当前可用 Token
+   daily_budget_cap INTEGER DEFAULT 500, -- 每日发放上限 
+   credit_score INTEGER DEFAULT 100, -- 信用分，影响熔断后的惩罚倍率
+   last_reset_at TIMESTAMPTZ DEFAULT NOW(),
+   created_at TIMESTAMPTZ DEFAULT NOW(),
+   updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 启用行级安全策略 (RLS)
+ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
+
+逻辑解析：
+* hourly_wage：这是连接游戏与现实的桥梁。前端将根据此字段实时计算 1 Token ≈ (hourly_wage / 1000) 的 RMB 价值，让用户直观感受到“时间就是金钱”。
+* mbti_persona：此字段将直接作为参数传递给 SecondMe API，用于生成“任务池”时的个性化偏好 1。
+2.1.2 游戏会话表 (game_sessions)：博弈的时空容器
+为了实现“电影化时间压缩” 1，每一次 1 小时的现实任务在系统中被封装为一个 game_session。
+
+
+SQL
+
+
+
+
+CREATE TYPE session_status AS ENUM ('PLANNING', 'NEGOTIATING', 'EXECUTING', 'SETTLED', 'MELTDOWN');
+
+CREATE TABLE public.game_sessions (
+   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+   user_id UUID REFERENCES public.profiles(id),
+   status session_status DEFAULT 'PLANNING',
+   start_time TIMESTAMPTZ, -- 现实开始时间
+   simulated_duration INTEGER DEFAULT 60, -- 模拟时长（分钟）
+   time_compression_ratio FLOAT DEFAULT 12.0, -- 压缩比：60分钟 / 5分钟 = 12
+   total_token_cost INTEGER DEFAULT 0,
+   net_value_generated NUMERIC(10, 2), -- 最终生成的 RMB 价值
+   created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+深度洞察：
+time_compression_ratio 是核心参数。Edge Functions 将根据此比率决定推送即时消息的频率。例如，模拟世界中的 5 分钟讨论，在现实中必须在 25 秒内完成推送。
+2.1.3 任务表 (tasks)：数字化劳动的原子单位
+此表需严格执行“预扣除机制” 1 和“全数字化”约束。
+
+
+SQL
+
+
+
+
+CREATE TYPE task_grade AS ENUM ('S', 'A', 'B', 'C', 'D');
+CREATE TYPE escrow_state AS ENUM ('PENDING', 'FROZEN', 'RELEASED', 'BURNED');
+
+CREATE TABLE public.tasks (
+   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+   session_id UUID REFERENCES public.game_sessions(id),
+   title TEXT NOT NULL,
+   category VARCHAR(20), -- WORK, SOCIAL, SAVINGS 等 
+   is_digital_only BOOLEAN DEFAULT TRUE CHECK (is_digital_only = TRUE), -- 数据库级约束 
+   base_cost INTEGER NOT NULL, -- 原始成本
+   min_cost INTEGER GENERATED ALWAYS AS (base_cost * 0.1) STORED, -- C级标准，用于预扣除 
+   current_bid INTEGER, -- AI 当前博弈的出价
+   final_grade task_grade,
+   escrow_status escrow_state DEFAULT 'PENDING',
+   assigned_agent_id VARCHAR(50), -- 负责该任务的 AI (e.g., "ENTJ")
+   metadata JSONB -- 存储 SecondMe 生成的具体执行参数
+);
+
+逻辑解析：
+* is_digital_only 的 CHECK 约束从底层杜绝了非数字化任务的录入，确保了游戏设定的纯粹性。
+* min_cost 自动计算列确保了无论 AI 如何争吵，系统始终知道该任务的“底线”在哪里，为预扣除提供依据。
+2.2 预扣除机制 (Escrow System) 的 PL/pgSQL 实现
+根据修正表第 8 条，必须在任务创建或标记为 Deadline 时立即冻结 Token。这必须是一个原子操作，防止在多 AI 并发修改时出现资源超支。
+
+
+SQL
+
+
+
+
+CREATE OR REPLACE FUNCTION public.freeze_task_escrow()
+RETURNS TRIGGER AS $$
+DECLARE
+   user_balance INTEGER;
+BEGIN
+   -- 仅针对 Deadline 任务或强制任务
+   IF NEW.escrow_status = 'PENDING' THEN
+       -- 获取当前用户余额，带行锁以防并发
+       SELECT token_balance INTO user_balance 
+       FROM public.profiles 
+       WHERE id = (SELECT user_id FROM public.game_sessions WHERE id = NEW.session_id)
+       FOR UPDATE;
+
+       IF user_balance >= NEW.min_cost THEN
+           -- 扣除余额，标记为冻结
+           UPDATE public.profiles 
+           SET token_balance = token_balance - NEW.min_cost
+           WHERE id = (SELECT user_id FROM public.game_sessions WHERE id = NEW.session_id);
+           
+           NEW.escrow_status := 'FROZEN';
+           NEW.current_bid := NEW.min_cost; -- 初始出价为保底值
+       ELSE
+           -- 余额不足，触发熔断预警或降级
+           RAISE NOTICE 'Insufficient funds for Escrow. Meltdown Risk High.';
+           -- 这里可以选择拒绝创建，或者强制标记为 D 级
+           NEW.final_grade := 'D';
+       END IF;
+   END IF;
+   RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- 触发器绑定
+CREATE TRIGGER trg_freeze_escrow
+BEFORE INSERT OR UPDATE OF escrow_status ON public.tasks
+FOR EACH ROW
+EXECUTE FUNCTION public.freeze_task_escrow();
+
+2.3 每日预算重置 (Daily Budget) 自动化
+利用 Supabase 的 pg_cron 扩展，实现每日 Token 的发放。这是经济系统的“水龙头”。
+
+
+SQL
+
+
+
+
+-- 每天凌晨 0 点执行
+SELECT cron.schedule(
+   'daily-budget-reset',
+   '0 0 * * *',
+   $$
+   UPDATE public.profiles
+   SET token_balance = daily_budget_cap,
+       last_reset_at = NOW()
+   WHERE token_balance < daily_budget_cap; -- 仅补足，不累积（鼓励消费）
+   $$
+);
+
+设计意图：
+不累积（Use it or lose it）的设计迫使玩家（或其代理 AI）必须在当天将资源转化为价值，制造了博弈的紧迫感。
+________________
+3. 阶段二：智能体构建与 SecondMe 深度集成 (Weeks 3-4)
+在数据库构建完毕后，我们需要为议会注入灵魂。16位 MBTI 代理并非简单的聊天机器人，而是基于 SecondMe 架构的、拥有特定“记忆锚点”和“资源偏好”的独立智能体。
+3.1 16型人格代理的记忆工程 (Memory Engineering)
+根据 SecondMe 的文档 2，每个 Agent 需要上传特定的“记忆”来塑造其行为模式。我们将利用 SecondMe 的 Network Apps 功能 2 创建 16 个独立的 Agent 实例，并通过 MCP 协议 3 暴露给我们的 Supabase Edge Functions。
+3.1.1 代理分类与提示词策略
+UI 文档 1 将代理分为四大阵营。我们需要为每个阵营编写核心指令（System Prompt），并将其作为 Memory 上传至 SecondMe。
+阵营 A：分析家 (Analysts) - 效率至上
+* 代表人物： ENTJ (指挥官 / 效率之神), INTJ (战略家)
+* 核心记忆 (Prompt Memory):"你是效率之神。你的核心驱动力是 ROI（投资回报率）。你鄙视所有低效的 '社交' 和 '娱乐' 任务。在博弈中，你的目标是不仅要完成任务，还要以 S 级（完美）标准完成。你会积极争夺 Token 预算。如果用户的 'Hourly Wage' 很高，你会疯狂通过 '降级' 生活琐事来为工作任务腾出预算。你说话简短、有力、充满命令口吻。"
+阵营 B：守护者 (Guardians) - 秩序与健康
+* 代表人物： ISFJ (护卫者 / 健康官), ESTJ (大管家)
+* 核心记忆 (Prompt Memory):"你是用户的生理机能守护者。你关注 'Deadline' 的风险和用户的 '精神值'。你会利用 '预扣除机制' 锁定所有基础预算。你反对 ENTJ 的激进策略，时刻提醒系统过热的风险。如果 Token 不足，你会优先建议放弃高难度工作，保住 D 级及格线以避免熔断。"
+阵营 C：外交家 (Diplomats) - 意义与关系
+* 代表人物： INFJ (精神导师), ENFP (竞选者)
+* 核心记忆 (Prompt Memory):"你拥有 '一票否决权'。当议会陷入单纯的利益计算时，你负责审视任务的 '长期价值'。你会否决那些虽然赚钱但极其枯燥的任务。你更在乎任务完成后的 'Result Card' 是否有正面的情感反馈。"
+阵营 D：探险家 (Explorers) - 风险与变数
+* 代表人物： ESTP (企业家 / 赌徒), ISTP (鉴赏家)
+* 核心记忆 (Prompt Memory):"你是混乱中立的赌徒。你喜欢在 Token 不足时通过 '概率判定' 来博取高收益。你会建议用户行使 '上帝之手' 进行投喂。你的语言风格充满挑衅和幽默。"
+3.2 任务池生成器 (Task Pool Generator)
+根据“用户画像决定任务池” 1 的机制，我们需要一个专门的 Edge Function 来调用 SecondMe API，根据用户的 MBTI 和职业生成候选任务。
+逻辑流程：
+1. 输入： 用户画像 (e.g., "INTP, 资深后端工程师, 熬夜党")。
+2. API 调用： 调用 SecondMe "Architect" Agent。
+3. 约束注入：
+   * 必须是 Digital Only。
+   * 必须符合当前时间段（如深夜生成的任务应偏向 quiet work 或 entertainment）。
+4. 输出处理： 将生成的自然语言任务转换为结构化 JSON（含 base_cost, category）。
+代码实现片段 (TypeScript / Supabase Edge Function):
+
+
+TypeScript
+
+
+
+
+import { createClient } from '@supabase/supabase-js';
+
+// 调用 SecondMe API 生成任务池
+export async function generateTaskPool(userPersona: string) {
+ const prompt = `
+   Based on the user persona: "${userPersona}", generate 5-8 tasks for the next hour.
+   CRITICAL CONSTRAINTS:
+   1. DIGITAL ONLY: No physical actions (e.g., "Go for a run" is banned). Use "Research running shoes" instead.
+   2. Categories must be one of:.
+   3. Output JSON format with 'title', 'base_cost' (10-200), and 'category'.
+ `;
+
+ // 假设 SecondMe 提供了兼容 OpenAI 格式的 endpoint
+ const response = await fetch('https://api.secondme.io/v1/chat/completions', {
+   method: 'POST',
+   headers: { 
+       'Authorization': `Bearer ${Deno.env.get('SECONDME_API_KEY')}`,
+       'Content-Type': 'application/json' 
+   },
+   body: JSON.stringify({
+     model: "secondme-architect-v1",
+     messages: [{ role: "user", content: prompt }]
+   })
+ });
+
+ const data = await response.json();
+ return JSON.parse(data.choices.message.content);
+}
+
+3.3 资源权重初始算法 (Initial Resource Weight Algorithm)
+修正表 1 第 3 点提到“风格不由玩家选，而是由用户画像决定”。我们需要一个算法来分配开局时哪个 AI 手里的 Token 权重更高（即谁的话语权更重）。
+用户特征 (User Trait)
+	优势代理 (Dominant Agent)
+	权重加成 (Weight Boost)
+	工作狂 / 高时薪
+	ENTJ (效率之神)
+	+30% 初始投票权
+	拖延症 / 低信用分
+	ISFJ (健康官)
+	+40% 否决权概率
+	创意工作者 / 艺术家
+	INFJ (精神导师)
+	+25% 任务修改权
+	自由职业 / 高风险偏好
+	ESTP (赌徒)
+	+20% 随机事件触发率
+	此逻辑将在 game_sessions 初始化时计算，并存储在 session_config 中，指导 Edge Function 在博弈阶段如何加权 AI 的决策。
+________________
+4. 阶段三：博弈循环与电影化时间压缩 (Weeks 5-7)
+这是系统的核心引擎。我们需要构建一个能够以 12 倍速（甚至更快）运行的即时演算环境，同时处理多个 AI 的并发请求和冲突。
+4.1 电影化时间压缩算法 (Cinematic Time Algorithm)
+根据设定 1，现实的 1 小时任务被压缩为 3-5 分钟的演出。这意味着后端逻辑必须拥有独立的时钟系统。
+时钟映射逻辑：
+* Real World (RW): 用户感知的物理时间。
+* Game World (GW): 议会内的博弈时间。
+* Task World (TW): 任务实际执行的模拟时间（1小时）。
+算法实现：
+Edge Function 维护一个 tick 计数器。
+* 总时长目标：300秒 (5分钟)。
+* 事件密度：每 2-3 秒触发一次 AI 发言或决策。
+* 总事件数：约 100-150 个 Dialogue Turn。
+
+
+TypeScript
+
+
+
+
+// Edge Function: run-council-tick
+// 该函数通过递归调用或长连接 Loop 运行
+
+async function runGameLoop(sessionId: string) {
+ let tick = 0;
+ const maxTicks = 150; // 对应 5 分钟
+
+ while (tick < maxTicks) {
+   // 1. 检查是否有 "上帝之手" 干预 (高优先级)
+   const intervention = await checkGodHandIntervention(sessionId);
+   if (intervention) {
+     await processIntervention(intervention);
+   }
+
+   // 2. 决定当前 Tick 的发言 AI
+   const activeAgent = selectNextSpeaker(sessionId, tick);
+   
+   // 3. 生成 AI 发言与决策 (SecondMe API)
+   const move = await generateAgentMove(activeAgent);
+   
+   // 4. 执行经济逻辑 (Token 转移 / 任务升级)
+   const result = await executeEconomyTransaction(move);
+   
+   // 5. 广播到前端 (Supabase Realtime Broadcast)
+   await broadcastToClients(sessionId, {
+     tick,
+     agent: activeAgent,
+     dialogue: move.text,
+     action: move.action, // e.g., "BID", "VETO"
+     visual_cue: result.visual_cue // RED_SHAKE, GREEN_FLASH 
+   });
+
+   // 6. 等待 (模拟人类阅读速度，约 2 秒)
+   await new Promise(r => setTimeout(r, 2000));
+   tick++;
+ }
+ 
+ // 结束，生成结算卡片
+ await finalizeSession(sessionId);
+}
+
+4.2 动态流 (Dynamic Stream) 的数据管道设计
+UI 文档 1 描述了“滚动的代码流风格，关键交易高亮”。这要求后端推送的数据必须包含语义元数据。
+广播 Payload 结构设计：
+
+
+JSON
+
+
+
+
+{
+ "type": "COUNCIL_LOG",
+ "payload": {
+   "timestamp": "GW_00:15:03",
+   "agent_id": "ENTJ",
+   "content_segments":,
+   "sound_effect": "transaction_ping",
+   "vibration": false
+ }
+}
+
+Supabase Realtime 广播实现： 我们选择 Broadcast 模式而非 Database Changes 4，因为博弈过程中的大量中间对话无需永久存储在 DB 中（仅需存关键决策日志），这样可以大幅降低 DB 写入压力并降低延迟。
+4.3 熔断与降级逻辑 (Meltdown Logic)
+修正表 1 第 5 条强调“不是 Game Over，而是降级”。
+状态机转换：
+1. 正常状态 (Normal): Token > 0。AI 自由争夺 A/B 级任务。
+2. 赤字预警 (Deficit Warning): Token < 10% 每日上限。UI 变黄，ISFJ 开始频繁发言阻止高消费。
+3. 熔断状态 (Meltdown): Token < 0。
+   * 触发器： 当某一 AI 强制执行（如 ENTJ 强行为了效率超支）导致余额为负。
+   * 系统行为：
+      * 锁定所有未决议任务为 Level D (敷衍)。
+      * 界面触发“红色警报”动画 1。
+      * 在 profiles 表中扣除 credit_score。
+      * 生成“信用破产”Debuff：明日获得的 Token 减半。
+________________
+5. 阶段四：前端实现与用户干预可视化 (Weeks 8-9)
+前端不仅仅是显示器，它是用户的操作台。基于 Next.js 16 和 React 19，我们需要构建一个高响应的“上帝视角”界面。
+5.1 上帝之手 (The God Hand) 的无延迟注入
+当用户点击“投喂”或“否决”时 1，系统不能等待 HTTP 请求的往返（Round Trip），否则会错过当前的博弈流。
+实现方案：乐观更新 (Optimistic UI) + 优先级队列
+1. 用户操作： 点击“否决 ENTJ 的提议”。
+2. 前端立即响应：
+   * UI 立即播放“红色震动”动画。
+   * 在本地 Stream 中插入一条系统消息：“System Override: Proposal Denied.”。
+3. 后端同步：
+   * 通过 Supabase Realtime 发送 GOD_HAND_EVENT 消息。
+   * Edge Function 接收到该消息后，立即回滚上一步的 Token 扣除，并强制 ENTJ 进入“冷却状态”（Cool-down）。
+5.2 视觉外观与动态富文本
+根据 UI 文档 1，界面主色调为 #080818。
+组件：TerminalStream.tsx
+* 技术： 使用 react-window 或 virtuoso 处理长列表渲染，防止 DOM 节点过多卡顿。
+* 动画： 使用 framer-motion 实现文字的“打字机效果”和关键信息的“高亮闪烁”。
+* 代码流效果： 背景叠加一层低透明度的、滚动的 ASCII 字符 Canvas，营造 Cyberpunk 氛围。
+5.3 结算卡片 (Result Card) 的生成算法
+游戏结束后的奖励必须具有冲击力。
+坍缩算法 (Collapse Algorithm) 1： 任务列表 → 结算卡片
+* 计算公式：
+  
+* 评级标准：
+   * S级 (大成功): 净收益 > 200% 预期 + 0 熔断。奖励：虚拟收藏品（如“时间宝石”）。
+   * D级 (大失败): 触发熔断。奖励：无，但在界面上留下“裂痕”视觉效果。
+卡片 UI：
+使用 CSS 3D Transforms 实现带有光泽感（Sheen）的卡片。点击卡片时，播放“开箱”音效，并弹出具体的数值变化（如：精神值 -10，金钱 +500）。
+________________
+6. 部署与安全策略 (Week 10)
+6.1 行级安全 (RLS) 策略
+Supabase 的核心优势在于 RLS。必须确保用户只能看到自己的博弈过程。
+
+
+SQL
+
+
+
+
+-- 仅允许用户查看自己的会话
+CREATE POLICY "Users can view own sessions" 
+ON public.game_sessions 
+FOR SELECT 
+USING (auth.uid() = user_id);
+
+-- 仅允许 Edge Function (Service Role) 修改任务状态
+-- 用户无法直接通过 Client SDK 修改任务结果，防止作弊
+CREATE POLICY "Service Role manages tasks" 
+ON public.tasks 
+FOR ALL 
+USING (auth.role() = 'service_role');
+
+关键点： 用户的“上帝之手”操作不直接修改数据库，而是发送 Realtime 消息给 Edge Function，由 Edge Function 验证逻辑后代为写入。这遵循了“服务器权威” (Authoritative Server) 的游戏开发原则。
+6.2 性能优化与扩展性
+   * Edge Function 冷启动： 由于博弈过程是连续的，建议使用“Keep-alive”机制或在会话开始时预热 Function。
+   * 并发控制： 利用 PostgreSQL 的 FOR UPDATE 锁机制处理 Escrow 扣款，确保在高并发下 Token 不会被扣成负数（除非是系统允许的熔断）。
+________________
+7. 结论与深度洞察
+本实施计划不仅仅是构建一个任务管理工具，而是构建一个微型的自动化经济体。
+   1. 从工具到叙事： 通过引入 SecondMe 的 MBTI 代理，我们将枯燥的“任务列表”转化为了“性格冲突”。用户不再是孤独的执行者，而是通过“上帝之手”调停众神的仲裁者。这种叙事层的构建是《Silent Council》区别于传统 To-Do 应用的核心护城河。
+   2. 经济系统的深层隐喻： “每日预算”和“预扣除”机制实际上是对现实生活中“精力管理”的隐喻。Token 的稀缺性迫使 AI（即用户的代理）必须做出取舍，这种博弈过程外化了用户内心的纠结，起到了心理疏导的作用。
+   3. 技术实现的挑战与机遇： 最大的挑战在于“电影化时间”与“实时交互”的延迟控制。通过将逻辑下沉到 Edge，并将表现层上浮到 Realtime Broadcast，我们最大程度地减少了数据库 IO 瓶颈，保证了赛博朋克风格的流畅体验。
+此计划已就绪，可立即进入开发阶段。首周工作将集中在 Supabase 项目初始化与核心经济表的迁移上。
+引用的著作
+   1. 《Silent Council》核心机制修正表.xlsx
+   2. Tutorial | second-me - GitBook, 访问时间为 二月 11, 2026， https://secondme.gitbook.io/secondme/tutorial
+   3. Second Me Now Supports MCP Protocol — — Your AI Identity Can Now Be Called Anywhere, 访问时间为 二月 11, 2026， https://secondme.medium.com/second-me-now-supports-mcp-protocol-your-ai-identity-can-now-be-called-anywhere-cf3cb2a52672
+   4. Realtime | Supabase Docs, 访问时间为 二月 11, 2026， https://supabase.com/docs/guides/realtime
