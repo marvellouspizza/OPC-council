@@ -77,7 +77,9 @@ export async function POST(request: NextRequest) {
         templateId,
         trigger,
         status: 'ACTIVE',
-        userProfileSnapshot: profile as Prisma.InputJsonValue,
+        userProfileSnapshot: JSON.parse(
+          JSON.stringify(profile)
+        ) as Prisma.InputJsonValue,
       },
     });
 
