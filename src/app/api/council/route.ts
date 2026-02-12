@@ -10,6 +10,7 @@ import { runCouncilSession, encodeSSE } from '@/lib/council/orchestrator';
 import type { CouncilLogEntry, UserProfile, TokenAllocation } from '@/lib/council/types';
 import { DEFAULT_TOKEN_ALLOCATION } from '@/lib/council/types';
 import { prisma } from '@/lib/prisma';
+import type { Prisma } from '@prisma/client';
 
 export async function POST(request: NextRequest) {
   const user = await getCurrentUser();
@@ -76,7 +77,7 @@ export async function POST(request: NextRequest) {
         templateId,
         trigger,
         status: 'ACTIVE',
-        userProfileSnapshot: profile,
+        userProfileSnapshot: profile as Prisma.InputJsonValue,
       },
     });
 
