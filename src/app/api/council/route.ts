@@ -108,7 +108,7 @@ export async function POST(request: NextRequest) {
                   metadata: log.metadata as any,
                   timestamp: log.timestamp,
                 },
-              }).catch(err => {
+              }).catch((err: unknown) => {
                 console.error('保存日志失败:', err);
               });
             },
@@ -149,7 +149,7 @@ export async function POST(request: NextRequest) {
             data: {
               status: 'CANCELLED',
             },
-          }).catch(err => console.error('更新会议状态失败:', err));
+          }).catch((err: unknown) => console.error('更新会议状态失败:', err));
           
           const errorEvent = formatSSEEvent({
             id: `err_${Date.now()}`,
