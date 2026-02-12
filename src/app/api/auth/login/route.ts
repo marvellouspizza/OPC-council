@@ -3,14 +3,6 @@ import { cookies } from 'next/headers';
 
 export async function GET() {
   const state = crypto.randomUUID();
-  const cookieStore = await cookies();
-
-  cookieStore.set('oauth_state', state, {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: 'lax',
-    maxAge: 60 * 10,
-  });
 
   const params = new URLSearchParams({
     client_id: process.env.SECONDME_CLIENT_ID!,
@@ -22,5 +14,14 @@ export async function GET() {
 
   const authUrl = `${process.env.SECONDME_AUTH_URL}/?${params}`;
   console.log('Auth URL:', authUrl);
-  return NextResponse.redirect(authUrl);
+
+  const response = NextResponse.redirect(authUrl);
+  response.cookies.set('oauth_state', state, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'lax',
+    maxAge: 60 * 10,
+  });
+
+  return response;
 }

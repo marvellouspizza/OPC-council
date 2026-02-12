@@ -11,15 +11,21 @@ export async function GET(request: NextRequest) {
   const state = searchParams.get('state');
   const error = searchParams.get('error');
 
+  const redirectWithStateClear = (url: URL) => {
+    const response = NextResponse.redirect(url);
+    response.cookies.delete('oauth_state');
+    return response;
+  };
+
   console.log('OAuth callback:', { code: code?.slice(0, 10) + '...', state, error });
 
   if (error) {
     console.error('OAuth error from provider:', error);
-    return NextResponse.redirect(new URL(`/?error=${error}`, request.url));
+    return redirectWithStateClear(new URL(`/?error=${error}`, request.url));
   }
 
   if (!code) {
-    return NextResponse.redirect(new URL('/?error=no_code', request.url));
+    return redirectWithStateClear(new URL('/?error=no_code', request.url));
   }
 
   // 验证 state（防 CSRF）
@@ -27,10 +33,8 @@ export async function GET(request: NextRequest) {
   const savedState = cookieStore.get('oauth_state')?.value;
   if (savedState && state && savedState !== state) {
     console.error('State mismatch:', { savedState, state });
-    return NextResponse.redirect(new URL('/?error=state_mismatch', request.url));
+    return redirectWithStateClear(new URL('/?error=state_mismatch', request.url));
   }
-  // 清除 state cookie
-  cookieStore.delete('oauth_state');
 
   try {
     // 用授权码换取 Token
@@ -84,7 +88,7 @@ export async function GET(request: NextRequest) {
         tokenExpiresAt,
       },
       create: {
-        secondmeUserId: String(userInfo.id),
+        secondmeUserId: String(secondmeUserId),
         email: userInfo.email || '',
         name: userInfo.name || userInfo.nickname || 'User',
         avatarUrl: userInfo.avatarUrl || userInfo.avatar || null,
@@ -98,18 +102,19 @@ export async function GET(request: NextRequest) {
     console.log('User upserted:', user.id);
 
     // 设置 Cookie
-    cookieStore.set('user_id', user.id, {
+    const response = NextResponse.redirect(new URL('/', request.url));
+    response.cookies.set('user_id', user.id, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'lax',
       maxAge: 60 * 60 * 24 * 30, // 30 天
     });
+    response.cookies.delete('oauth_state');
 
-    // 重定向到首页
-    return NextResponse.redirect(new URL('/', request.url));
+    return response;
   } catch (error) {
     console.error('OAuth 回调错误:', error);
-    return NextResponse.redirect(
+    return redirectWithStateClear(
       new URL(`/?error=callback_failed&detail=${encodeURIComponent(String(error))}`, request.url)
     );
   }
