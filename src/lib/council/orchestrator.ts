@@ -134,6 +134,7 @@ export async function runCouncilSession(config: OrchestratorConfig): Promise<{
   logs: CouncilLogEntry[];
   finalStates: AgentState[];
   resultCard: ResultCard;
+  roundNumber: number;
 }> {
   const startTime = Date.now();
   councilSessionCounter++;
@@ -511,6 +512,7 @@ export async function runCouncilSession(config: OrchestratorConfig): Promise<{
     logs: session.logs,
     finalStates: context.agentStates,
     resultCard,
+    roundNumber: session.context.currentRound,
   };
 }
 

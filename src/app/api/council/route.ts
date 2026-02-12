@@ -135,7 +135,7 @@ export async function POST(request: NextRequest) {
               status: 'COMPLETED',
               finalVerdict: result.verdict as any,
               resultCard: result.resultCard as any,
-              roundNumber: result.verdict?.roundNumber || 0,
+              roundNumber: result.roundNumber || 0,
             },
           });
 
